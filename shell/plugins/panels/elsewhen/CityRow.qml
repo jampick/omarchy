@@ -26,7 +26,12 @@ Rectangle {
   readonly property var rowData: panel.clockRows[index]
     || ({ ready: false, label: modelData.label, id: modelData.id })
   readonly property bool ready: rowData.ready
-  readonly property var greeting: Greet.greeting(rowData.id, ready ? rowData.hour : 0)
+  // A clock or a fictional place says where its number comes from instead.
+  readonly property bool hasNote: !!rowData.note
+  readonly property var greeting: hasNote ? ({ text: rowData.note, roman: "" })
+    : Greet.greeting(rowData.id, ready ? rowData.hour : 0)
+  // Rows with no day to draw - a light delay, a count, a calendar - have no strip.
+  readonly property bool hasStrip: !rowData.clock || !!rowData.strip || !!rowData.earthStrip
   readonly property bool removable: panel.clockRows.length > 1
   readonly property bool dragged: panel.dragIndex === index
   readonly property var people: modelData.people || []
@@ -48,7 +53,8 @@ Rectangle {
   width: parent.width
   // The top pad is measured to the cap height, not the line box, so the row
   // looks as tall above the name as below the strip.
-  implicitHeight: (pad - panel.capGap) + rowLabels.implicitHeight + stripGap + strip.trackHeight + pad
+  implicitHeight: (pad - panel.capGap) + rowLabels.implicitHeight
+    + (hasStrip ? stripGap + strip.trackHeight : 0) + pad
   radius: Style.cornerRadius
   // Opaque: knocked-aside rows pass over one another and over the globe.
   // Hover lifts a row from its own time of day. The picked city takes the
@@ -99,7 +105,7 @@ Rectangle {
     anchors.left: parent.left
     anchors.right: parent.right
     anchors.top: parent.top
-    anchors.bottom: strip.top
+    anchors.bottom: row.hasStrip ? strip.top : parent.bottom
     preventStealing: true
     cursorShape: row.dragged ? Qt.ClosedHandCursor : Qt.OpenHandCursor
 
@@ -289,6 +295,9 @@ Rectangle {
         Behavior on opacity { NumberAnimation { duration: Style.duration(110) } }
 
         Caption {
+          // A clock's date can run long ("Quintidi 15 Brumaire CCXXXV").
+          width: Math.min(implicitWidth, rowLabels.width)
+          elide: Text.ElideRight
           text: row.ready ? row.rowData.date : "\u2026"
           color: row.ready && row.rowData.dayLabel !== "" ? row.dim : row.fainter
         }
@@ -313,6 +322,8 @@ Rectangle {
 
         // Non-Latin scripts fall back per character through fontconfig.
         Caption {
+          width: Math.min(implicitWidth, rowLabels.width)
+          elide: Text.ElideRight
           text: row.greeting.text
           color: row.foreground
         }
@@ -336,11 +347,17 @@ Rectangle {
     anchors.verticalCenter: parent.bottom
     anchors.verticalCenterOffset: -(row.pad + trackHeight / 2)
 
-    ready: row.ready
-    offsetMinutes: row.ready ? row.rowData.offsetMinutes : 0
-    progress: row.ready ? row.rowData.progress : 0
-    fallbackLit: row.ready && row.rowData.lit
-    place: row.panel.facts[Model.factsKey(row.modelData)] || null
+    visible: row.hasStrip
+    ready: row.ready && row.hasStrip
+    custom: row.rowData.strip || null
+    offsetMinutes: row.rowData.earthStrip ? row.rowData.earthStrip.offsetMinutes
+      : row.ready && !row.rowData.clock ? row.rowData.offsetMinutes : 0
+    progress: row.rowData.strip ? row.rowData.strip.progress
+      : row.rowData.earthStrip ? row.rowData.earthStrip.progress
+      : row.ready && !row.rowData.clock ? row.rowData.progress : 0
+    fallbackLit: row.ready && !!row.rowData.lit
+    place: row.rowData.earthStrip ? row.rowData.earthStrip
+      : row.panel.facts[Model.factsKey(row.modelData)] || null
     nowMs: row.panel.effectiveMs
     hovered: rowHover.hovered
     hour24: row.panel.hour24
@@ -425,7 +442,8 @@ Rectangle {
         text: row.ready ? row.rowData.time : "--:--"
         color: row.foreground
         font.family: row.fontFamily
-        font.pixelSize: Style.font.heading
+        // A count - a Unix time, a Long Count - is a dozen glyphs, not five.
+        font.pixelSize: row.rowData.long ? Style.font.subtitle : Style.font.heading
         font.weight: Font.DemiBold
       }
 

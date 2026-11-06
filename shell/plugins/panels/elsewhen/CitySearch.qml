@@ -3,6 +3,7 @@ import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
+import "Elsewhere.js" as Elsewhere
 
 // A button that opens into a city search: a field, then the matching cities
 // with their zone and offset - the zone catalogue first, then the places the
@@ -14,6 +15,9 @@ Column {
 
   // [{ label, value }] from Model.zoneOptions.
   property var options: []
+  // Clocks and fictional places from Elsewhere.worldOptions, found only by
+  // typing for them: the add search has them all, the globe's the places.
+  property var worldOptions: []
   property int limit: 6
   // Room under the offline matches for the geocoder's places.
   property int placeLimit: 4
@@ -44,10 +48,16 @@ Column {
 
   property bool active: false
   readonly property string query: field.text
+  readonly property bool emptyQuery: query.trim() === ""
+  readonly property var offline: {
+    if (!active) return { matches: [], more: 0 }
+    return Elsewhere.combinedMatches(worldOptions, options, query, limit)
+  }
+  // How many offline matches did not fit, said only once something is typed.
+  readonly property int more: emptyQuery ? 0 : offline.more
   readonly property var matches: {
     if (!active) return []
-    var offline = Model.searchZones(options, query, limit)
-    return Model.mergePlaces(offline, placesFor(query), existing, limit + placeLimit)
+    return Model.mergePlaces(offline.matches, placesFor(query), existing, limit + placeLimit)
   }
   readonly property bool searching: active && placesPending(query)
   // An index, not the match itself: the list is rebuilt on every keystroke.
@@ -75,7 +85,7 @@ Column {
 
   function pick(match) {
     picked(match.label, match.value, match.lat === undefined ? null
-      : { lat: match.lat, lon: match.lon, region: match.region || "" })
+      : { lat: match.lat, lon: match.lon, region: match.region || "", fiction: match.fiction || "" })
     stop()
   }
 

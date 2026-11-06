@@ -158,6 +158,80 @@ The panel fetches it with `curl`, in two steps: one geocoding request per city i
 
 Cities are geocoded by their **label**, not their zone, which matters for aliases: Miami and Boca Raton share `America/New_York` but resolve to their own Florida coordinates and report genuinely different temperatures. Where a label cannot be geocoded, the zone's representative coordinates from `/usr/share/zoneinfo/zone1970.tab` are the fallback; after a network failure that fallback is used for now and the geocode retried on the next refresh.
 
+## Elsewhere: clocks that are not a city
+
+The list also takes rows that are not a place on Earth's zone map: Mars, the Moon, deep space, odd ways of keeping Earth's time, calendars from fiction, and fictional towns. A fresh list gets two of them after its five cities, Mars Time and the Kelvin stardate, as a taste. The other 27 are not advertised anywhere. They turn up in the add search when you type for them ("mars", "trek", "hobbit", "unix"), which is how they are meant to be found.
+
+Every one of them is a function of the UTC instant and nothing else, so none needs the `date` probe, the network or a timer of its own. They tick with the rows around them and follow the scrubber. The arithmetic is in `Worlds.js`, plain numbers in and out. `Elsewhere.js` is the catalogue: what each clock is called, what it puts in each slot of a city row, and how the search finds it.
+
+| Clock | Shows | From |
+|---|---|---|
+| Mars Time | Coordinated Mars Time, Darian date, Mars Sol Date | Mars24 (Allison & McEwen), Gangale's calendar |
+| Jezero Crater, Gale Crater | rover local mean solar time and mission sol | Mars24 at each landing site, sol 0 = landing day |
+| Light to Mars | one-way light time and distance | JPL's mean Keplerian elements (Standish) |
+| Space Station | UTC, which the crew calls GMT | |
+| Tranquility Base | lunar day or night count, next sunrise or sunset | the mean lunar phase |
+| Voyager 1 | light time, and when it passes one light-day | a straight-line fit to JPL Horizons |
+| Sidereal time | local sidereal time where you are, and GMST | IAU 1982 |
+| Internet Time | Swatch beats on Biel Mean Time | |
+| Atomic time, GPS time | TAI and GPS to the second | the leap-second table |
+| Julian Date, Unix time | the counts themselves | |
+| Decimal time | ten-hour time on Paris Mean Time, Republican date | the Republic's own sextile years, then Romme's rule |
+| Long Count | Maya Long Count, Tzolk'in and Haab' | GMT correlation 584283 |
+| The Shire | Shire Reckoning date and weekday | Tolkien, Appendix D |
+| Tamriel | Elder Scrolls month, weekday and year | months map one for one; 4E 201 = 2011 |
+| Imperial date | Warhammer 40,000 dating | the published format |
+| Stardate, Kelvin / TNG | `2026.309` / a fan formula with 2323 as zero | the 2009 film's rule / fan convention |
+| Galactic Standard | ABY year and day of a 368-day year | 0 ABY = 25 May 1977 |
+| Arrakis | AG year | 10191 AG = 1965, the book's year |
+| Westeros, Springfield | AC year, and `??:??` | jokes, and labelled as such |
+| Miller's planet, Narnia, Dream levels 1-3 | time passed there since you added the row | 1 hour = 7 years; Lewis's 2,555 years over 1900-1949; 20× per level |
+
+Fictional places (Gotham, Metropolis, Hogwarts, Twin Peaks, Hill Valley, Stars Hollow, Wakanda) are not clocks. Each is a city row on a real zone, stored with a `fiction` slug and the coordinates of the town it keeps time with, so it gets that town's weather, daylight and spot on the globe under its own name. Hogwarts reads Glenfinnan's weather, Stars Hollow reads Washington Depot's. The globe's jump box finds them too.
+
+### What goes in which slot
+
+A clock row is a city row with its slots repurposed, not a new kind of row:
+
+- The big time is the clock's own value: `00:56`, `15 Blotmath`, `0 845 026.M3`. A count a dozen glyphs long (Unix time, the Long Count) drops a size so the label beside it keeps some room.
+- The zone abbreviation and offset become the standard's name and a second fact: `MTC  MSD 54335`, `LMST  Sol 2031`.
+- The date line is the in-world date, or the line that explains the number (`seconds since 1970`).
+- Weather is gone. There is nothing keyless to ask about Mars.
+- Hover shows where the number comes from, in the slot where a city shows its greeting: `Mars24, NASA GISS`, `Fan rule: 0 ABY = 25 May 1977`.
+
+Precision is said three ways, all in slots a row already has. An exact rule names itself in the abbreviation slot. A model of something real (light time, the lunar day, Narnia's rate) puts `~` in front of the value. An anchor somebody chose reads `fan rule`, and the two with no rule at all read `joke`.
+
+### Strips
+
+A strip appears only where there is a day to draw. Mars rows get a sol, from Mars24's declination and equation of time at the site's latitude. Mars has next to no refraction, so the horizon is the geometric one. Tranquility Base gets a whole lunation, with Earth as its night marker, at the phase it shows the Moon. Decimal time gets Paris's own day. The marker on a Mars night is a plain dark disc: the Moon on an Earth row is tonight's Moon, and it would be wrong on Mars.
+
+Light delays, counts, calendars and rate clocks have no strip and their rows are shorter. Rows were already different heights (people add a line), and the drag code measures each row's own pitch.
+
+Dragging a sol-long or month-long strip scrubs every clock the way an Earth strip does: the pointer is a position in that clock's own day, resolved to the nearest occurrence, so a drag on Tranquility Base can move the list by days. `Elsewhere.scrubDeltaMinutes` holds that and `formatScrubDelta` already spoke in days.
+
+### Rate clocks
+
+Miller's planet, Narnia and the dream levels have no calendar to anchor to, so the anchor is the moment you added the row: you went in when you added it. It is stored as `since`, in milliseconds. To start again, remove the row and add it back. Scrubbing to before the anchor reads "not there yet".
+
+### Storing them
+
+A clock is `{ "name": "Jezero Crater", "clock": "mars/jezero" }` in the `cities` list, with no `zone`. In memory its `id` is `"@" + clock`, and the `@` keeps it out of everything that reads `id` as a zone: the probe, the geocoder, the greetings and the globe. A clock id this build does not know is kept and shown as `--:--` with "Needs a newer Elsewhen", rather than dropped. Otherwise an older build would delete a newer build's clock the first time it saved.
+
+Over IPC, `add` takes a clock id or a place slug as well as a zone:
+
+```bash
+omarchy-shell omarchy.elsewhen add mars/jezero
+omarchy-shell omarchy.elsewhen add gotham
+```
+
+### Finding them
+
+The clocks share the add search with the 598 zones, and a city still comes first. "mar" lists Marseille and Martinique before Mars, so three letters and Return still picks what it always did. A clock only goes above the cities when a word of the query is one of its keywords exactly, so "mars" puts the four Mars clocks first. Every word must match, so "fiction trek" is the two stardates. The right-hand column, where a zone shows `UTC+5:45`, shows what a clock's row would say: `Sol 2031`, `@317`, `2026.309`.
+
+The list stays six long so it still wraps on screen. When more match, a line under it says how many more and suggests another word.
+
+`test/shell.d/elsewhen-worlds-test.sh` checks the arithmetic against outside answers: the Mars24 worked example, the start dates of Mars Years 37 to 39, JPL Horizons ranges for Mars and Voyager 1 (held in the test verbatim so it stays offline), GMST at J2000, the Long Count turning over on 21 December 2012, and three days the French Republic dated itself. It also checks the storage round trip, the search order and every row in the catalogue.
+
 ## The hour's greeting
 
 Point at a row and its date line turns into what people there would actually be saying to each other at that moment: Tokyo at midday says こんにちは, at eight in the evening こんばんは, at three in the morning おやすみ. The pronunciation follows it in grey, because a greeting you cannot say out loud is only a decoration.

@@ -42,6 +42,7 @@ Item {
   // Reached with the jump box; the panel never saves them.
   property var sessionCities: []
   property var jumpOptions: []          // the whole zone catalogue, unfiltered
+  property var jumpPlaces: []           // fictional places, found by typing for them
   // The panel's geocoder lookups, so the jump box can reach any town.
   property var placesFor: function(text) { return [] }
   property var placesPending: function(text) { return false }
@@ -610,6 +611,7 @@ Item {
     anchors.bottom: parent.bottom
     opacity: root.chromeOpacity
     options: root.jumpOptions
+    worldOptions: root.jumpPlaces
     limit: 5
     inlineResults: false
     loading: root.jumpOptions.length === 0

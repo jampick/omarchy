@@ -24,6 +24,10 @@ Item {
   property bool hour24: false
   property var words: null
   property real moonPhase: 0
+  // A clock's own day from Elsewhere.js - a Mars sol, a lunar day - in place
+  // of the city sun: { spans, lit, nightPhase }. nightPhase is the marker by
+  // night (Earth's phase from the Moon), or 0 for a plain dark disc.
+  property var custom: null
   property color foreground: Commons.Color.foreground
   property color fainter: Qt.darker(foreground, 2.1)
   property color daylightMarker: "#E5C736"
@@ -62,7 +66,7 @@ Item {
   readonly property double dayMs: ready ? Sun.localMidnightMs(nowMs, offsetMinutes) : 0
 
   readonly property var sun: {
-    if (!ready || !place || place.lat === undefined || place.lon === undefined) return null
+    if (custom || !ready || !place || place.lat === undefined || place.lon === undefined) return null
     // Local noon: the instant furthest from either edge of the day.
     return Sun.sunTimes(place.lat, place.lon, dayMs + 43200000, offsetMinutes)
   }
@@ -79,8 +83,8 @@ Item {
   }
 
   // Read from the band that is drawn, so the sun never sits in the dark.
-  readonly property bool litNow: sun ? Sun.litAt(sun, ready ? progress * 1440 : 0)
-                                     : (ready && fallbackLit)
+  readonly property bool litNow: custom ? custom.lit
+    : sun ? Sun.litAt(sun, ready ? progress * 1440 : 0) : (ready && fallbackLit)
 
   Rectangle {
     id: track
@@ -94,8 +98,8 @@ Item {
 
     // Polar night has no band at all, rather than a zero-width one.
     Repeater {
-      model: strip.sun ? Sun.litSpans(strip.sun)
-                       : [{ x0: Model.daylightStart(), x1: Model.daylightEnd() }]
+      model: strip.custom ? strip.custom.spans
+        : strip.sun ? Sun.litSpans(strip.sun) : [{ x0: Model.daylightStart(), x1: Model.daylightEnd() }]
 
       Rectangle {
         required property var modelData
@@ -119,7 +123,7 @@ Item {
       MoonDot {
         anchors.fill: parent
         visible: !strip.litNow
-        phase: strip.moonPhase
+        phase: strip.custom ? strip.custom.nightPhase : strip.moonPhase
         color: strip.foreground
       }
 
@@ -139,7 +143,7 @@ Item {
     property int chipAtPress: Model.NO_CHIP
 
     function onMoon(mouse) {
-      if (strip.litNow) return false
+      if (strip.litNow || strip.custom) return false
       return Math.abs(mouse.x - (nowMarker.x + nowMarker.width / 2)) <= nowMarker.width
     }
 

@@ -64,7 +64,8 @@ Column {
       }
 
       // Two cities in one zone differ by name, two zones with one name by
-      // offset. A place's region already says where it is, so its zone stays off.
+      // offset. A place's region already says where it is, so its zone stays
+      // off. A clock shows what its row would say.
       Row {
         id: matchZone
         anchors.right: parent.right
@@ -73,8 +74,8 @@ Column {
         spacing: Style.spacing.md
 
         Caption {
-          text: match.modelData.value
-          visible: !match.modelData.region
+          text: match.modelData.value || ""
+          visible: !match.modelData.region && text !== ""
           color: list.citySearch.fainter
         }
 
@@ -94,6 +95,16 @@ Column {
         onClicked: list.citySearch.pick(match.modelData)
       }
     }
+  }
+
+  // Six rows stay six, so the list wraps on screen; the rest are a word away.
+  Caption {
+    visible: list.citySearch.more > 0
+    width: parent.width
+    horizontalAlignment: Text.AlignHCenter
+    topPadding: Style.spacing.sm
+    text: I18n.tn("elsewhen.moreMatches", list.citySearch.more).arg(I18n.formatNumber(list.citySearch.more))
+    color: list.citySearch.fainter
   }
 
   Caption {

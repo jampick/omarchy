@@ -6,6 +6,7 @@ import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 import "GlobeModel.js" as Solar
+import "Elsewhere.js" as Elsewhere
 
 // A bar button that opens a panel of clocks, one row per city, and zooms into
 // a globe. QML has no Intl, so a `date` probe supplies each zone's offset and
@@ -33,7 +34,8 @@ Panel {
   // ---- settings
   // `cities` once written; until then the older `zones` string.
   readonly property var zones: Model.parseCities(setting("cities", null), setting("zones", ""))
-  readonly property var zoneIds: zones.map(function(z) { return z.id })
+  // Clocks are not zones: the probe never sees them.
+  readonly property var zoneIds: zones.filter(function(z) { return !z.clock }).map(function(z) { return z.id })
   // Never written: the first probe seeds the list around the local zone.
   readonly property bool needsSeed: zones.length === 0
   readonly property var probeIds: needsSeed ? zoneIds.concat(Model.seedCandidateZones()) : zoneIds
@@ -72,6 +74,7 @@ Panel {
 
   function offsetTextFor(rowData) {
     if (!rowData || !rowData.ready) return ""
+    if (rowData.clock) return rowData.detail
     return offsetMode === "utc" ? Model.utcOffsetLabel(rowData.offsetMinutes, words) : rowData.relative
   }
 
@@ -97,6 +100,8 @@ Panel {
   onAddingChanged: if (!adding && scroller) scroller.scrollToTop()
   readonly property bool choosingHere: hereSearch ? hereSearch.active : false
   readonly property var zoneOptions: Model.zoneOptions(zoneCatalogText, zones)
+  // Mars, the Moon, other ways of keeping time, and fiction: only the add search offers them.
+  readonly property var worldOptions: Elsewhere.worldOptions(zones, words)
   // The globe's jump box may go to a city that is already tracked.
   readonly property var allZoneOptions: Model.zoneOptions(zoneCatalogText, [])
   readonly property var searchZoneIds: {
@@ -104,6 +109,8 @@ Panel {
     var matches = (citySearch ? citySearch.matches : []).concat(hereSearch ? hereSearch.matches : [])
     for (var i = 0; i < matches.length; i++) {
       var id = matches[i].value
+      // A clock's preview needs no probe.
+      if (!id || Elsewhere.isClockId(id)) continue
       if (out.indexOf(id) < 0) out.push(id)
     }
     return out
@@ -272,9 +279,15 @@ Panel {
   readonly property double effectiveMs: nowMs + scrubMinutes * 60000
   readonly property string scrubLabel: Model.formatScrubDelta(scrubMinutes, words)
 
-  // Measured against the unscrubbed present, so a drag cannot drift.
+  // Measured against the unscrubbed present, so a drag cannot drift. A clock's
+  // strip may be a sol or a lunar day long rather than a day.
   function scrubTo(rowData, fraction) {
     if (!rowData || !rowData.ready) return
+    if (rowData.clock) {
+      var at = Elsewhere.stripProgress(rowData, nowMs)
+      if (at !== null) scrubMinutes = Elsewhere.scrubDeltaMinutes(fraction, at, Elsewhere.stripPeriodMs(rowData, nowMs))
+      return
+    }
     var parts = Model.zoneParts(nowMs, rowData.offsetMinutes)
     scrubMinutes = Model.scrubDeltaMinutes(fraction, parts.hour * 60 + parts.minute)
   }
@@ -316,7 +329,16 @@ Panel {
   }
 
   // ---- places
-  readonly property var clockRows: Model.rows(zones, probe, effectiveMs, localOffsetMinutes, hour24, words)
+  readonly property var clockRows: Elsewhere.rows(zones, probe, effectiveMs, localOffsetMinutes, hour24, words, worldContext)
+
+  // What the clocks that are not zones need to know about here: the date
+  // (the Shire's and Tamriel's days are yours), and where you are for sidereal time.
+  readonly property var worldContext: ({
+    here: Model.localParts(effectiveMs),
+    hereLon: homePlace ? homePlace.lon : null,
+    hereLabel: homeCity,
+    offsetMinutes: localOffsetMinutes
+  })
 
   // The system zone names a representative city; a chosen `here` overrides it
   // while the machine stays on that zone, so a trip resets it on its own.
@@ -324,7 +346,9 @@ Panel {
   readonly property string homeCity: hereZone ? hereZone.label : ""
   readonly property var homeZone: hereZone || ({ label: "", id: localZone })
 
+  // Clocks have no place on the globe; a fictional place sits on its host town.
   function placeOf(zone) {
+    if (!zone || zone.clock) return null
     var f = facts[Model.factsKey(zone)]
     return (f && f.lat !== undefined && f.lon !== undefined) ? f : null
   }
@@ -332,7 +356,8 @@ Panel {
   readonly property var homePlace: homeCity === "" || localZone === "" ? null : placeOf(homeZone)
 
   // Matched by name: Miami should not light up New York.
-  readonly property var trackedNames: zones.map(function(z) { return String(z.label).toLowerCase() })
+  readonly property var trackedNames: zones.filter(function(z) { return !z.clock })
+    .map(function(z) { return String(z.label).toLowerCase() })
 
   function globeRows(list, rank) {
     var out = []
@@ -492,7 +517,11 @@ Panel {
 
   // The label matters as much as the zone: many cities share one. A place from
   // the geocoder brings its coordinates, so the row never has to look itself up.
-  function addCity(id, label, place) { setZones(Model.addZone(zones, id, label || "", place)) }
+  // A rate clock starts counting when it is added.
+  function addCity(id, label, place) {
+    if (String(id).indexOf("@rate/") === 0) place = { since: Date.now() }
+    setZones(Model.addZone(zones, id, label || "", place))
+  }
   function removeCity(id) { setZones(Model.removeZone(zones, id)) }
   function removeCityAt(index) { setZones(Model.removeZoneAt(zones, index)) }
 
@@ -518,6 +547,7 @@ Panel {
     if (seeded.length > 0 && hereZone.lat !== undefined) seeded[0] = Object.assign({}, seeded[0], hereZone)
     if (seeded.length === 0) seeded = Model.parseZones(Model.DEFAULT_ZONES)
     if (seeded.length === 0) return
+    seeded = seeded.concat(Elsewhere.seedClocks(words))
 
     persistSettings({ cities: Model.serializeCities(seeded), zones: undefined })
     refresh()
@@ -660,14 +690,16 @@ Panel {
     catalogProc.running = true
   }
 
+  // A clock in the search shows what its row would say.
   function utcLabelFor(zoneId) {
+    if (Elsewhere.isClockId(zoneId)) return Elsewhere.preview(String(zoneId).slice(1), nowMs, worldContext, words)
     var known = searchProbe[zoneId]
     return known === undefined ? "" : Model.utcOffsetLabel(known.offsetMinutes, words)
   }
 
   // Tracked cities, the city you are in (for the globe's home) and session cities.
   readonly property var factsRequest: {
-    var out = zones.slice()
+    var out = zones.filter(function(z) { return !z.clock })
     if (hereZone) out.push(hereZone)
     return out.concat(sessionCities)
   }
@@ -955,8 +987,13 @@ Panel {
       root.tick()
       return JSON.stringify(root.clockRows)
     }
+    // A clock by its id, `add mars/jezero`, or a fictional place by its slug, `add gotham`.
     function add(zone: string, label: string): string {
-      root.setZones(Model.addZone(root.zones, zone, label))
+      var clock = Elsewhere.clockIdFor(zone)
+      var fiction = Elsewhere.placeEntry(String(zone).trim().toLowerCase())
+      if (clock !== "") root.addCity(clock, label || Elsewhere.clockLabel(clock.slice(1), root.words), null)
+      else if (fiction) root.addCity(fiction.zone, label || fiction.label, { lat: fiction.lat, lon: fiction.lon, fiction: fiction.slug })
+      else root.setZones(Model.addZone(root.zones, zone, label))
       return Model.serializeZones(root.zones)
     }
     function remove(zone: string): string { root.removeCity(zone); return Model.serializeZones(root.zones) }
@@ -1208,6 +1245,7 @@ Panel {
                   visible: root.zoom < 1
                   width: parent.width
                   options: root.zoneOptions
+                  worldOptions: root.worldOptions
                   existing: root.zones
                   placesFor: function(text) { return root.placesFor(text) }
                   placesPending: function(text) { return root.placesPending(text) }
@@ -1289,6 +1327,7 @@ Panel {
                 // The footer and jump bar arrive once the globe has landed.
                 item.chromeOpacity = Qt.binding(function() { return Util.clamp((root.zoom - 0.74) / 0.26, 0, 1) })
                 item.jumpOptions = Qt.binding(function() { return root.allZoneOptions })
+                item.jumpPlaces = Qt.binding(function() { return Elsewhere.placeOptions(root.words) })
                 item.placesFor = function(text) { return root.placesFor(text) }
                 item.placesPending = function(text) { return root.placesPending(text) }
                 item.placeSearchRequested.connect(function(text) { root.requestPlaces(text) })

@@ -40,6 +40,10 @@ function digits(text, words) {
 
 // Keeps the list free of entries that could never name a zone.
 var ZONE_ID = /^[A-Za-z0-9_+\-\/]+$/
+// A clock that is not a zone, "mars/jezero"; stored with an "@" in the row id.
+var CLOCK = /^[a-z0-9]+\/[a-z0-9-]+$/
+// A fictional place's slug, "gotham".
+var FICTION = /^[a-z0-9-]+$/
 
 // Labels live in a "Label|Zone, Label|Zone" string, so they may not carry either delimiter.
 function cleanLabel(label) {
@@ -100,10 +104,20 @@ function parseCities(cities, legacyZones) {
   for (var i = 0; i < cities.length; i++) {
     var c = cities[i]
     if (!c || typeof c !== "object") continue
+    // A clock rather than a city (Elsewhere.js). One this build does not know
+    // is kept as it is, so a newer build's clock survives an older one's save.
+    var clock = String(c.clock || "").trim()
+    if (CLOCK.test(clock)) {
+      var clockRow = { label: cleanLabel(c.name) || clock, id: "@" + clock, clock: clock }
+      if (isFinite(Number(c.since)) && c.since !== null && c.since !== "") clockRow.since = Number(c.since)
+      out.push(clockRow)
+      continue
+    }
     var id = String(c.zone || "").trim()
     if (id === "" || !ZONE_ID.test(id)) continue
     var label = cleanLabel(c.name)
     var entry = withPlace({ label: label === "" ? labelForZoneId(id) : label, id: id }, c)
+    if (FICTION.test(String(c.fiction || ""))) entry.fiction = String(c.fiction)
     var people = Array.isArray(c.people) ? cleanPeople(c.people) : []
     if (people.length > 0) entry.people = people
     out.push(entry)
@@ -116,7 +130,14 @@ function serializeCities(zones) {
   for (var i = 0; i < zones.length; i++) {
     var z = zones[i]
     if (!z || !z.id) continue
+    if (z.clock) {
+      var clockEntry = { name: z.label || z.clock, clock: z.clock }
+      if (z.since !== undefined) clockEntry.since = z.since
+      out.push(clockEntry)
+      continue
+    }
     var entry = withPlace({ name: z.label || labelForZoneId(z.id), zone: z.id }, z)
+    if (z.fiction) entry.fiction = z.fiction
     if (z.people && z.people.length > 0) entry.people = z.people.slice()
     out.push(entry)
   }
@@ -606,11 +627,22 @@ function regionalName(name, region) {
 // when the coordinates say so, and is named with its region to tell them apart:
 // a row is known by its name and zone.
 function addZone(zones, id, label, place) {
-  var zoneId = String(id || "").trim()
+  var raw = String(id || "").trim()
+  if (raw.charAt(0) === "@") {
+    var clock = raw.slice(1)
+    if (!CLOCK.test(clock)) return zones
+    var clockName = cleanLabel(label) || clock
+    if (indexOfZone(zones, clockName, raw) >= 0) return zones
+    var clockRow = { label: clockName, id: raw, clock: clock }
+    if (place && isFinite(Number(place.since)) && place.since !== null) clockRow.since = Number(place.since)
+    return zones.concat([clockRow])
+  }
+  var zoneId = raw
   if (zoneId === "" || !ZONE_ID.test(zoneId)) return zones
   var name = cleanLabel(label)
   if (name === "") name = labelForZoneId(zoneId)
   var row = withPlace({ label: name, id: zoneId }, place)
+  if (place && FICTION.test(String(place.fiction || ""))) { row.fiction = String(place.fiction); delete row.region }
   var at = indexOfZone(zones, name, zoneId)
   if (at >= 0) {
     if (row.lat === undefined || zones[at].lat === undefined || nearPlace(zones[at], row)) return zones
@@ -1313,6 +1345,11 @@ function seedZones(home, offsets, count) {
 if (typeof module !== "undefined") {
   module.exports = {
     DEFAULT_ZONES: DEFAULT_ZONES,
+    word: word,
+    fill: fill,
+    digits: digits,
+    formatDate: formatDate,
+    hasEntry: hasEntry,
     NO_CHIP: NO_CHIP,
     SEED_CANDIDATES: SEED_CANDIDATES,
     parseZones: parseZones,
